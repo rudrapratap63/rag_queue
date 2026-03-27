@@ -1,0 +1,31 @@
+services:
+  valkey:
+    image: valkey/valkey
+    ports: 
+      - "6379:6379"
+
+  api:
+    build: .
+    command: uvicorn server:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_HOST=valkey
+      - QDRANT_URL=http://host.docker.internal:6333
+      - GROQ_API_KEY=${GROQ_API_KEY}
+    volumes:
+      - .:/app
+    depends_on:
+      - valkey
+
+  worker:
+    build: .
+    command: rq worker -u redis://valkey:6379
+    environment:
+      - REDIS_HOST=valkey
+      - QDRANT_URL=http://host.docker.internal:6333
+      - GROQ_API_KEY=${GROQ_API_KEY}
+    volumes:
+      - .:/app
+    depends_on:
+      - valkey

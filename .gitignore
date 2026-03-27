@@ -1,0 +1,23 @@
+# Environments and Secrets
+.env
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.class
+
+# IDEs
+.vscode/
+.idea/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Logs & Data (for RAG/Vector DB usually)
+*.log
+qdrant_data/
+data/
