@@ -8,6 +8,8 @@ A Retrieval-Augmented Generation (RAG) application built with asynchronous backg
 - **Message Broker (`valkey`)**: Acts as a drop-in replacement for Redis to manage the job queue.
 - **Worker (`queues/worker.py`)**: An RQ background worker that processes the chat queries, performs semantic search against a Qdrant vector database, and generates responses using the `llama-3.3-70b-versatile` model via Groq.
 
+![alt text](./rag_queue_architecture.png)
+
 ## 🛠️ Prerequisites
 
 - [Docker](https://www.docker.com/) and Docker Compose
