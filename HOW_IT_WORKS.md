@@ -95,3 +95,48 @@ graph TD
 * **Non-Blocking:** By moving the 5-10 second AI generation step out of the HTTP request cycle, the FastAPI server remains lighting fast and can accept thousands of concurrent requests.
 * **Scalable:** If you start getting too many requests, you can simply spin up 5 more Worker containers. They will all connect to the same Valkey queue and process jobs in parallel.
 * **Resilient:** If a job fails because the Groq API times out, the queue remembers the job and can easily retry it.
+
+### How the Containers "Talk" to Each Other
+Imagine your computer is an office building. By default, when you run `docker-compose up`, Docker creates a private "Virtual Local Area Network" (VLAN) for your application. This is like a private office floor just for your RAG project. 
+
+*   Inside this private office floor, Docker assigns a specific desk (an IP address) to every container defined in your `docker-compose.yml`.
+*   Docker has a built-in "receptionist" (an internal DNS server). Instead of your containers having to memorize each other's IP addresses, they just use the **names of the services** written in your `docker-compose.yml`.
+
+So, when your FastAPI container wants to connect to the queue, it doesn't need a complex URL. It just looks for `REDIS_HOST=valkey`. Docker secretly maps the word `valkey` to the exact IP address of the Valkey container on that private floor. 
+
+The `valkey` container acts as the literal middleman. 
+1.  **The API connects to Valkey:** When you enqueue a job with RQ, the FastAPI container connects to the `valkey` container and writes "Job X" into the database.
+2.  **The Worker connects to Valkey:** The worker container runs the command `rq worker -u redis://valkey:6379`. This tells the worker to also connect to the `valkey` container over that private network.
+
+**Crucially, the API container and the Worker container NEVER talk directly to each other.** The API drops off a package at Valkey, and the Worker picks up a package from Valkey. 
+
+### How "Separate Compute" Actually Works
+When we say "separate compute," it means each container is treated by your computer's operating system as an entirely separate process, just like having Google Chrome and Microsoft Word open at the same time.
+
+*   When the **API (`uvicorn`)** is running, it might be utilizing 5% of CPU Core 1.
+*   When the **Worker (`rq`)** doing heavy embeddings and Qdrant searching, it might suddenly spike and use 100% of CPU Core 2.
+
+Because they are isolated processes in isolated Docker environments:
+1.  If the worker's processing maxes out its CPU core, it *does not slow down* the FastAPI container. FastAPI can continue listening on its own core and answering new requests instantly. 
+2.  If the worker somehow crashes due to a bad file or a timeout out of memory error, the FastAPI container stays online.
+
+### Scaling the Workers for the Future
+Because the API and the Worker do not talk directly to each other and only talk to Valkey, scaling becomes incredibly easy.
+
+Let's say your app becomes very popular, and suddenly you get 10 users requesting RAG queries at the exact same second.
+*   Your API instantly creates 10 jobs in Valkey (`Job 1` through `Job 10`).
+*   If you only have **one Worker**, that worker must process `Job 1`, wait 10 seconds for Groq, finish, and then start `Job 2`. The 10th user will wait over a minute for their result!
+
+Because of this decoupled architecture, scaling in the future simply requires telling Docker to spin up more Worker clones. You can do this with a single command:
+```bash
+docker-compose up -d --scale worker=5
+```
+
+If you do this, Docker spins up 5 identical worker containers running identical code. All 5 are given access to your private Docker network, and all 5 connect to `valkey`.
+
+**What happens to those 10 concurrent requests now?**
+*   **Worker A** grabs Job 1.
+*   **Worker B** grabs Job 2.
+*   **Worker C** grabs Job 3... etc.
+
+They all process jobs independently in parallel. Once Worker A finishes Job 1, it immediately asks Valkey for the next available job (Job 6). The 10th user goes from waiting a minute to waiting just 10-15 seconds. You achieved "horizontal scaling" without needing to rewrite a single line of your FastAPI code!
